@@ -1,0 +1,5 @@
+#BSUB -n 1
+#BSUB -W 00:15
+#BSUB -o output/task_v1_180x160_t8.%J.out
+#BSUB -e output/task_v1_180x160_t8.%J.err
+OMP_NUM_THREADS=8 ./task_v1 180 160 0.001
