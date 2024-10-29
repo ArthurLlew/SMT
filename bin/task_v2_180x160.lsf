@@ -2,4 +2,4 @@
 #BSUB -W 00:15
 #BSUB -o output/task_v2_180x160.%J.out
 #BSUB -e output/task_v2_180x160.%J.err
-OMP_NUM_THREADS=1 ./task_v2 180 160 0.0001
+OMP_NUM_THREADS=1 ./task_v2 180 160 0.00004

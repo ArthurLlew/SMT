@@ -2,4 +2,4 @@
 #BSUB -W 00:15
 #BSUB -o output/task_v0_180x160.%J.out
 #BSUB -e output/task_v0_180x160.%J.err
-./task_v0 180 160 0.0001
+./task_v0 180 160 0.00004
