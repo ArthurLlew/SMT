@@ -12,7 +12,7 @@ M = data.shape[1]
 fig = plt.figure(figsize=(7, 7))
     
 # Figure title
-fig.suptitle('Heat Map', fontsize=20, y=0.88)
+fig.suptitle('Heat Map', fontsize=20, y=0.92)
 
 # Subplot
 subplot = fig.add_subplot()
