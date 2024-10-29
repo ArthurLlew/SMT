@@ -186,22 +186,22 @@ int main(int argc, char *argv[])
 
     // MPI start
     // Get basic MPI info
-    int rank, size;
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    int pid, total_pids;
+    MPI_Init(NULL, NULL);
+    MPI_Comm_rank(MPI_COMM_WORLD, &pid);
+    MPI_Comm_size(MPI_COMM_WORLD, &total_pids);
     // Grid coordinates
-    int dims[2];
-    MPI_Dims_create(size, 2, dims);
+    int dims[2] = {0,0};
+    MPI_Dims_create(total_pids, 2, dims);
     int pid_j_max = dims[0],  pid_i_max = dims[1];
-    int pid_j = rank/pid_j_max, pid_i = rank%pid_j_max;
+    int pid_j = pid/pid_j_max, pid_i = pid%pid_j_max;
 
     // Debug
-    printf("MPI init: Success. (Pros %d of %d in total)\n",rank,size);
+    printf("MPI init: Success. (Pros %d of %d in total)\n",pid,total_pids);
 
     // Matrix sizes
-    int sizeN = (N/pid_j_max + 1 + (pid_j==pid_j_max ? N%pid_j_max : 0));
-    int sizeM = (M/pid_i_max + 1 + (pid_i==pid_i_max ? M%pid_i_max : 0));
+    int sizeN = (N/pid_j_max + 1 + (pid_j==(pid_j_max-1) ? N%pid_j_max : 0));
+    int sizeM = (M/pid_i_max + 1 + (pid_i==(pid_i_max-1) ? M%pid_i_max : 0));
     int size = sizeN*sizeM;
     // Allocalte a_ij, b_ij and F_ij
     double *a_ij = reinterpret_cast<double*>(malloc(size * sizeof(double)));
@@ -236,10 +236,10 @@ int main(int argc, char *argv[])
         for (int i = 0; i < sizeM; i++)
         {
             // Half coordinates
-            double x_i_mhalf = xmin + ((i + pid_i * M/pid_i_max) + 0.5)*h_x; // i+1 shifts our triangle properly
-            double x_i_phalf = xmin + ((i + pid_i * M/pid_i_max) + 1.5)*h_x;
-            double y_j_mhalf = ymax - ((j + pid_j * N/pid_j_max) - 0.5)*h_y; // "ymax -" instead of "ymin + " inverts triangle upwards
-            double y_j_phalf = ymax - ((j + pid_j * N/pid_j_max) + 0.5)*h_y;
+            double x_i_mhalf = xmin + ((i + pid_i * M/pid_i_max - (pid_i?1:0)) + 0.5)*h_x; // i+1 shifts our triangle properly
+            double x_i_phalf = xmin + ((i + pid_i * M/pid_i_max - (pid_i?1:0)) + 1.5)*h_x;
+            double y_j_mhalf = ymax - ((j + pid_j * N/pid_j_max - (pid_j?1:0)) - 0.5)*h_y; // "ymax -" instead of "ymin + "
+            double y_j_phalf = ymax - ((j + pid_j * N/pid_j_max - (pid_j?1:0)) + 0.5)*h_y; //  inverts triangle upwards
 
             // a_ij
             // Inside D
@@ -420,7 +420,7 @@ int main(int argc, char *argv[])
 
     // Debug
     printf("Init a_ij, b_ij, F_ij: Success\n");
-/*
+
     bool loop_cond = true;
     // We must count iterations
     int iters = 0;
@@ -429,9 +429,9 @@ int main(int argc, char *argv[])
     {
         // Compute r_ij
         #pragma omp parallel for collapse(2)
-        for (int j = 1; j < N-1; j++)
+        for (int j = 1; j < sizeN-1; j++)
         {
-            for (int i = 1; i < M-1; i++)
+            for (int i = 1; i < sizeM-1; i++)
             {
                 r_ij[j*sizeM + i] = DIFF_OPER_A(w_ij_curr) - F_ij[j*sizeM + i];
             }
@@ -441,21 +441,23 @@ int main(int argc, char *argv[])
         double dot_product11 = 0;
         double dot_product12 = 0;
         #pragma omp parallel for reduction(+:dot_product11,dot_product12)
-        for (int j = 1; j < N-1; j++)
+        for (int j = 1; j < sizeN-1; j++)
         {
-            for (int i = 1; i < M-1; i++)
+            for (int i = 1; i < sizeM-1; i++)
             {
                 dot_product11 += r_ij[j*sizeM + i] * r_ij[j*sizeM + i];
                 dot_product12 += DIFF_OPER_A(r_ij) * r_ij[j*sizeM + i];
             }
         }
+        MPI_Allreduce(&dot_product11, &dot_product11, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        MPI_Allreduce(&dot_product12, &dot_product12, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         double iter_param = dot_product11/dot_product12;
 
         // Compute w_ij_curr
         #pragma omp parallel for collapse(2)
-        for (int j = 1; j < N-1; j++)
+        for (int j = 1; j < sizeN-1; j++)
         {
-            for (int i = 1; i < M-1; i++)
+            for (int i = 1; i < sizeM-1; i++)
             {
                 w_ij_curr[j*sizeM + i] = w_ij_prev[j*sizeM + i] - iter_param*r_ij[j*sizeM + i];
             }
@@ -465,18 +467,19 @@ int main(int argc, char *argv[])
         double iter_delta = 0;
         double diff;
         #pragma omp parallel for private(diff) reduction(+:iter_delta)
-        for (int j = 1; j < N-1; j++)
+        for (int j = 1; j < sizeN-1; j++)
         {
-            for (int i = 1; i < M-1; i++)
+            for (int i = 1; i < sizeM-1; i++)
             {
                 diff = w_ij_curr[j*sizeM + i] - w_ij_prev[j*sizeM + i];
                 iter_delta += diff*diff;
             }
         }
+        MPI_Allreduce(&iter_delta, &iter_delta, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         iter_delta = sqrt(iter_delta);
 
         // Depending on stop condition
-        if (iter_delta < delta)
+        if (iter_delta < delta || iters==4)
         {
             // Stop loop
             loop_cond = false;
@@ -485,9 +488,9 @@ int main(int argc, char *argv[])
         {
             // Copy current w_ij to previos w_ij
             #pragma omp parallel for collapse(2)
-            for (int j = 1; j < N-1; j++)
+            for (int j = 1; j < sizeN-1; j++)
             {
-                for (int i = 1; i < M-1; i++)
+                for (int i = 1; i < sizeM-1; i++)
                 {
                     w_ij_prev[j*sizeM + i] = w_ij_curr[j*sizeM + i];
                 }
@@ -499,7 +502,7 @@ int main(int argc, char *argv[])
     // Debug
     printf("Loop edned at iteration: %d\n", iters);
     chrono::steady_clock::time_point solve_ended = chrono::steady_clock::now();
-*/
+
     // Save results
     save_matrix(exec_name  + "_p(" + to_string(pid_j) + "," + to_string(pid_i) + ")_a", a_ij, sizeN, sizeM);
     save_matrix(exec_name + "_p(" + to_string(pid_j) + "," + to_string(pid_i) + ")_b", b_ij, sizeN, sizeM);
@@ -519,14 +522,14 @@ int main(int argc, char *argv[])
 
     // Debug
     printf("Freeing memory: Success\n");
-/*
+
     // Debug
     chrono::steady_clock::time_point prog_ended = chrono::steady_clock::now();
     printf("Solver run time: %ld.%ld[s]\n", chrono::duration_cast<std::chrono::milliseconds>(solve_ended - solve_stared).count()/1000,
                                             chrono::duration_cast<std::chrono::milliseconds>(solve_ended - solve_stared).count()%1000);
     printf("Programm run time: %ld.%ld[s]\n", chrono::duration_cast<std::chrono::milliseconds>(prog_ended - prog_stared).count()/1000,
                                               chrono::duration_cast<std::chrono::milliseconds>(prog_ended - prog_stared).count()%1000);
-*/
+
     // MPI ending
     MPI_Finalize();
 
