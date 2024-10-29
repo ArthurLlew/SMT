@@ -8,6 +8,8 @@
 #include <string>
 // Time
 #include <chrono>
+// MPI
+#include <mpi.h>
 
 using namespace std;
 
@@ -166,11 +168,6 @@ int main(int argc, char *argv[])
     // Delta
     double delta = stod(argv[3]);
 
-    int pid_j = 0;
-    int pid_i = 0;
-    int pid_j_max = 2;
-    int pid_i_max = 2;
-
     // Debug
     printf("Received parameters: %d, %d, %f\n", N, M, delta);
     chrono::steady_clock::time_point solve_stared = chrono::steady_clock::now();
@@ -186,6 +183,21 @@ int main(int argc, char *argv[])
 
     // Debug
     printf("Other parameters init: Success\n");
+
+    // MPI start
+    // Get basic MPI info
+    int rank, size;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    // Grid coordinates
+    int dims[2];
+    MPI_Dims_create(size, 2, dims);
+    int pid_j_max = dims[0],  pid_i_max = dims[1];
+    int pid_j = rank/pid_j_max, pid_i = rank%pid_j_max;
+
+    // Debug
+    printf("MPI init: Success. (Pros %d of %d in total)\n",rank,size);
 
     // Matrix sizes
     int sizeN = (N/pid_j_max + 1 + (pid_j==pid_j_max ? N%pid_j_max : 0));
@@ -489,9 +501,9 @@ int main(int argc, char *argv[])
     chrono::steady_clock::time_point solve_ended = chrono::steady_clock::now();
 */
     // Save results
-    save_matrix(exec_name + "_a", a_ij, sizeN, sizeM);
-    save_matrix(exec_name + "_b", b_ij, sizeN, sizeM);
-    save_matrix(exec_name + "_f", F_ij, sizeN, sizeM);
+    save_matrix(exec_name  + "_p(" + to_string(pid_j) + "," + to_string(pid_i) + ")_a", a_ij, sizeN, sizeM);
+    save_matrix(exec_name + "_p(" + to_string(pid_j) + "," + to_string(pid_i) + ")_b", b_ij, sizeN, sizeM);
+    save_matrix(exec_name + "_p(" + to_string(pid_j) + "," + to_string(pid_i) + ")_f", F_ij, sizeN, sizeM);
     //save_matrix(exec_name + "_res", w_ij_curr, sizeN, sizeM);
 
     // Debug
@@ -515,5 +527,8 @@ int main(int argc, char *argv[])
     printf("Programm run time: %ld.%ld[s]\n", chrono::duration_cast<std::chrono::milliseconds>(prog_ended - prog_stared).count()/1000,
                                               chrono::duration_cast<std::chrono::milliseconds>(prog_ended - prog_stared).count()%1000);
 */
+    // MPI ending
+    MPI_Finalize();
+
     return 0;
 }
