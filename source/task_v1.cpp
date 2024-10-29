@@ -177,12 +177,13 @@ int main(int argc, char *argv[])
 
     // Epsilon = max of grid steps
     double eps = max(h_x, h_y);
+    eps *= eps;
 
     // Debug
     printf("Other parameters init: Success\n");
 
-    // Sizes
-    int size = M*N;
+    // Matrix size
+    int size = N*M;
     // Allocalte a_ij, b_ij and F_ij
     double *a_ij = reinterpret_cast<double*>(malloc(size * sizeof(double)));
     double *b_ij = reinterpret_cast<double*>(malloc(size * sizeof(double)));
@@ -481,9 +482,9 @@ int main(int argc, char *argv[])
     chrono::steady_clock::time_point solve_ended = chrono::steady_clock::now();
 
     // Save results
-    //save_matrix(exec_name + "_a", a_ij, N, M);
-    //save_matrix(exec_name + "_b", b_ij, N, M);
-    //save_matrix(exec_name + "_f", F_ij, N, M);
+    save_matrix(exec_name + "_a", a_ij, N, M);
+    save_matrix(exec_name + "_b", b_ij, N, M);
+    save_matrix(exec_name + "_f", F_ij, N, M);
     save_matrix(exec_name + "_res", w_ij_curr, N, M);
 
     // Debug

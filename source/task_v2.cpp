@@ -99,8 +99,8 @@ cross_res get_segment_crossing_with_D(double x1, double y1, double x2, double y2
 
 // Differential operator over grid function
 #define DIFF_OPER_A(func) \
-    (-(a_ij[j*M + i + 1]*(func[j*M + i + 1] - func[j*M + i])/h_x - a_ij[j*M + i]*(func[j*M + i] - func[j*M + i - 1])/h_x)/h_x \
-     -(b_ij[(j+1)*M + i]*(func[(j+1)*M + i] - func[j*M + i])/h_y - b_ij[j*M + i]*(func[j*M + i] - func[(j-1)*M + i])/h_y)/h_y)
+    (-(a_ij[j*sizeM + i + 1]*(func[j*sizeM + i + 1] - func[j*sizeM + i])/h_x - a_ij[j*sizeM + i]*(func[j*sizeM + i] - func[j*sizeM + i - 1])/h_x)/h_x \
+     -(b_ij[(j+1)*M + i]*(func[(j+1)*M + i] - func[j*sizeM + i])/h_y - b_ij[j*sizeM + i]*(func[j*sizeM + i] - func[(j-1)*M + i])/h_y)/h_y)
 
 
 // Returns value of the right part in point (x,y)
@@ -166,6 +166,11 @@ int main(int argc, char *argv[])
     // Delta
     double delta = stod(argv[3]);
 
+    int pid_j = 0;
+    int pid_i = 0;
+    int pid_j_max = 2;
+    int pid_i_max = 2;
+
     // Debug
     printf("Received parameters: %d, %d, %f\n", N, M, delta);
     chrono::steady_clock::time_point solve_stared = chrono::steady_clock::now();
@@ -182,8 +187,10 @@ int main(int argc, char *argv[])
     // Debug
     printf("Other parameters init: Success\n");
 
-    // Matrix size
-    int size = N*M;
+    // Matrix sizes
+    int sizeN = (N/pid_j_max + 1 + (pid_j==pid_j_max ? N%pid_j_max : 0));
+    int sizeM = (M/pid_i_max + 1 + (pid_i==pid_i_max ? M%pid_i_max : 0));
+    int size = sizeN*sizeM;
     // Allocalte a_ij, b_ij and F_ij
     double *a_ij = reinterpret_cast<double*>(malloc(size * sizeof(double)));
     double *b_ij = reinterpret_cast<double*>(malloc(size * sizeof(double)));
@@ -198,11 +205,12 @@ int main(int argc, char *argv[])
     printf("Allocating memory: Success\n");
 
     // Init w_ij_prev as zero matrix
-    for (int j = 0; j < N; j++)
+    #pragma omp parallel for collapse(2)
+    for (int j = 0; j < sizeN; j++)
     {
-        for (int i = 0; i < M; i++)
+        for (int i = 0; i < sizeM; i++)
         {
-            w_ij_prev[j*M + i] = 0;
+            w_ij_prev[j*sizeM + i] = 0;
         }
     }
 
@@ -210,26 +218,27 @@ int main(int argc, char *argv[])
     printf("Init w_ij: Success\n");
 
     // Fill in a_ij, b_ij and F_ij
-    for (int j = 0; j < N; j++)
+    #pragma omp parallel for collapse(2)
+    for (int j = 0; j < sizeN; j++)
     {
-        for (int i = 0; i < M; i++)
+        for (int i = 0; i < sizeM; i++)
         {
             // Half coordinates
-            double x_i_mhalf = xmin + (i + 0.5)*h_x; // i+1 shifts our triangle properly
-            double x_i_phalf = xmin + (i + 1.5)*h_x;
-            double y_j_mhalf = ymax - (j - 0.5)*h_y; // "ymax -" instead of "ymin + " inverts triangle upwards
-            double y_j_phalf = ymax - (j + 0.5)*h_y;
+            double x_i_mhalf = xmin + ((i + pid_i * M/pid_i_max) + 0.5)*h_x; // i+1 shifts our triangle properly
+            double x_i_phalf = xmin + ((i + pid_i * M/pid_i_max) + 1.5)*h_x;
+            double y_j_mhalf = ymax - ((j + pid_j * N/pid_j_max) - 0.5)*h_y; // "ymax -" instead of "ymin + " inverts triangle upwards
+            double y_j_phalf = ymax - ((j + pid_j * N/pid_j_max) + 0.5)*h_y;
 
             // a_ij
             // Inside D
             if (is_point_in_D(x_i_mhalf, y_j_mhalf) && is_point_in_D(x_i_mhalf, y_j_phalf))
             {
-                a_ij[j*M + i] = 1;
+                a_ij[j*sizeM + i] = 1;
             }
             // Outside D
             else if (!is_point_in_D(x_i_mhalf, y_j_mhalf) && !is_point_in_D(x_i_mhalf, y_j_phalf))
             {
-                a_ij[j*M + i] = 1/eps;
+                a_ij[j*sizeM + i] = 1/eps;
             }
             // Partially in D
             else
@@ -250,19 +259,19 @@ int main(int argc, char *argv[])
                 double l_ij = sqrt(pow(crossing.x - x_i_mhalf, 2) + pow(crossing.y - point_in_D_y, 2));
 
                 // According to formula
-                a_ij[j*M + i] = l_ij / h_y + (1 - l_ij / h_y) / eps;
+                a_ij[j*sizeM + i] = l_ij / h_y + (1 - l_ij / h_y) / eps;
             }
 
             // b_ij
             // Inside D
             if (is_point_in_D(x_i_mhalf, y_j_mhalf) && is_point_in_D(x_i_phalf, y_j_mhalf))
             {
-                b_ij[j*M + i] = 1;
+                b_ij[j*sizeM + i] = 1;
             }
             // Outside D
             else if (!is_point_in_D(x_i_mhalf, y_j_mhalf) && !is_point_in_D(x_i_phalf, y_j_mhalf))
             {
-                b_ij[j*M + i] = 1/eps;
+                b_ij[j*sizeM + i] = 1/eps;
             }
             // Partially in D
             else
@@ -283,7 +292,7 @@ int main(int argc, char *argv[])
                 double l_ij = sqrt(pow(crossing.x - point_in_D_x, 2) + pow(crossing.y - y_j_mhalf, 2));
 
                 // According to formula
-                b_ij[j*M + i] = l_ij / h_x + (1 - l_ij / h_x) / eps;
+                b_ij[j*sizeM + i] = l_ij / h_x + (1 - l_ij / h_x) / eps;
             }
 
             // F_ij
@@ -291,13 +300,13 @@ int main(int argc, char *argv[])
             if (is_point_in_D(x_i_mhalf, y_j_mhalf) && is_point_in_D(x_i_mhalf, y_j_phalf) &&
                 is_point_in_D(x_i_phalf, y_j_mhalf) && is_point_in_D(x_i_phalf, y_j_phalf))
             {
-                F_ij[j*M + i] = f(xmin + i*h_x, ymin + j*h_y);
+                F_ij[j*sizeM + i] = f(xmin + i*h_x, ymin + j*h_y);
             }
             // Outside D
             else if (!is_point_in_D(x_i_mhalf, y_j_mhalf) && !is_point_in_D(x_i_mhalf, y_j_phalf) &&
                      !is_point_in_D(x_i_phalf, y_j_mhalf) && !is_point_in_D(x_i_phalf, y_j_phalf))
             {
-                F_ij[j*M + i] = 0;
+                F_ij[j*sizeM + i] = 0;
             }
             // Partially in D
             else
@@ -392,14 +401,14 @@ int main(int argc, char *argv[])
                 double S_ij = abs(a - b) / 2;
                 
                 // According to formula
-                F_ij[j*M + i] = S_ij * f_in_S_ij / (h_x * h_y);
+                F_ij[j*sizeM + i] = S_ij * f_in_S_ij / (h_x * h_y);
             }
         }
     }
 
     // Debug
     printf("Init a_ij, b_ij, F_ij: Success\n");
-
+/*
     bool loop_cond = true;
     // We must count iterations
     int iters = 0;
@@ -407,44 +416,48 @@ int main(int argc, char *argv[])
     while (loop_cond)
     {
         // Compute r_ij
+        #pragma omp parallel for collapse(2)
         for (int j = 1; j < N-1; j++)
         {
             for (int i = 1; i < M-1; i++)
             {
-                r_ij[j*M + i] = DIFF_OPER_A(w_ij_curr) - F_ij[j*M + i];
+                r_ij[j*sizeM + i] = DIFF_OPER_A(w_ij_curr) - F_ij[j*sizeM + i];
             }
         }
 
         // Compute iteration parameter (division of dot products)
         double dot_product11 = 0;
         double dot_product12 = 0;
+        #pragma omp parallel for reduction(+:dot_product11,dot_product12)
         for (int j = 1; j < N-1; j++)
         {
             for (int i = 1; i < M-1; i++)
             {
-                dot_product11 += r_ij[j*M + i] * r_ij[j*M + i];
-                dot_product12 += DIFF_OPER_A(r_ij) * r_ij[j*M + i];
+                dot_product11 += r_ij[j*sizeM + i] * r_ij[j*sizeM + i];
+                dot_product12 += DIFF_OPER_A(r_ij) * r_ij[j*sizeM + i];
             }
         }
         double iter_param = dot_product11/dot_product12;
 
         // Compute w_ij_curr
+        #pragma omp parallel for collapse(2)
         for (int j = 1; j < N-1; j++)
         {
             for (int i = 1; i < M-1; i++)
             {
-                w_ij_curr[j*M + i] = w_ij_prev[j*M + i] - iter_param*r_ij[j*M + i];
+                w_ij_curr[j*sizeM + i] = w_ij_prev[j*sizeM + i] - iter_param*r_ij[j*sizeM + i];
             }
         }
 
         // Compute iteration delta (Euclidean norm)
         double iter_delta = 0;
         double diff;
+        #pragma omp parallel for private(diff) reduction(+:iter_delta)
         for (int j = 1; j < N-1; j++)
         {
             for (int i = 1; i < M-1; i++)
             {
-                diff = w_ij_curr[j*M + i] - w_ij_prev[j*M + i];
+                diff = w_ij_curr[j*sizeM + i] - w_ij_prev[j*sizeM + i];
                 iter_delta += diff*diff;
             }
         }
@@ -459,11 +472,12 @@ int main(int argc, char *argv[])
         else
         {
             // Copy current w_ij to previos w_ij
+            #pragma omp parallel for collapse(2)
             for (int j = 1; j < N-1; j++)
             {
                 for (int i = 1; i < M-1; i++)
                 {
-                    w_ij_prev[j*M + i] = w_ij_curr[j*M + i];
+                    w_ij_prev[j*sizeM + i] = w_ij_curr[j*sizeM + i];
                 }
             }
         }
@@ -473,12 +487,12 @@ int main(int argc, char *argv[])
     // Debug
     printf("Loop edned at iteration: %d\n", iters);
     chrono::steady_clock::time_point solve_ended = chrono::steady_clock::now();
-
+*/
     // Save results
-    save_matrix(exec_name + "_a", a_ij, N, M);
-    save_matrix(exec_name + "_b", b_ij, N, M);
-    save_matrix(exec_name + "_f", F_ij, N, M);
-    save_matrix(exec_name + "_res", w_ij_curr, N, M);
+    save_matrix(exec_name + "_a", a_ij, sizeN, sizeM);
+    save_matrix(exec_name + "_b", b_ij, sizeN, sizeM);
+    save_matrix(exec_name + "_f", F_ij, sizeN, sizeM);
+    //save_matrix(exec_name + "_res", w_ij_curr, sizeN, sizeM);
 
     // Debug
     printf("Saving results: Success\n");
@@ -493,13 +507,13 @@ int main(int argc, char *argv[])
 
     // Debug
     printf("Freeing memory: Success\n");
-
+/*
     // Debug
     chrono::steady_clock::time_point prog_ended = chrono::steady_clock::now();
     printf("Solver run time: %ld.%ld[s]\n", chrono::duration_cast<std::chrono::milliseconds>(solve_ended - solve_stared).count()/1000,
                                             chrono::duration_cast<std::chrono::milliseconds>(solve_ended - solve_stared).count()%1000);
     printf("Programm run time: %ld.%ld[s]\n", chrono::duration_cast<std::chrono::milliseconds>(prog_ended - prog_stared).count()/1000,
                                               chrono::duration_cast<std::chrono::milliseconds>(prog_ended - prog_stared).count()%1000);
-
+*/
     return 0;
 }
