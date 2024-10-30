@@ -1,6 +1,6 @@
 #BSUB -n 2
 #BSUB -W 00:15
-#BSUB -o output/task_v2_90x80_p4_t2.%J.out
-#BSUB -e output/task_v2_90x80_p4_t2.%J.err
+#BSUB -o output/task_v2_90x80_p2_t2.%J.out
+#BSUB -e output/task_v2_90x80_p2_t2.%J.err
 OMP_NUM_THREADS=2
 mpiexec ./task_v2 90 80 0.00025
