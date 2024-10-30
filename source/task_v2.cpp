@@ -6,6 +6,7 @@
 #include <cmath>
 // Strings
 #include <string>
+#include <cstring>
 // Time
 #include <chrono>
 // MPI
@@ -102,7 +103,7 @@ cross_res get_segment_crossing_with_D(double x1, double y1, double x2, double y2
 // Differential operator over grid function
 #define DIFF_OPER_A(func) \
     (-(a_ij[j*sizeM + i + 1]*(func[j*sizeM + i + 1] - func[j*sizeM + i])/h_x - a_ij[j*sizeM + i]*(func[j*sizeM + i] - func[j*sizeM + i - 1])/h_x)/h_x \
-     -(b_ij[(j+1)*M + i]*(func[(j+1)*M + i] - func[j*sizeM + i])/h_y - b_ij[j*sizeM + i]*(func[j*sizeM + i] - func[(j-1)*M + i])/h_y)/h_y)
+     -(b_ij[(j+1)*sizeM + i]*(func[(j+1)*sizeM + i] - func[j*sizeM + i])/h_y - b_ij[j*sizeM + i]*(func[j*sizeM + i] - func[(j-1)*sizeM + i])/h_y)/h_y)
 
 
 // Returns value of the right part in point (x,y)
@@ -147,17 +148,89 @@ bool save_matrix(string name, double *matrix, int N, int M)
 }
 
 
+#define SYNC_DATA_BORDER(data) \
+/* Sync direction up */ \
+if (pid_j != 0) \
+{ \
+    MPI_Send(data + sizeM + 1, sizeM-2, MPI_DOUBLE, (pid_j-1)*pid_i_max + pid_i, 1, MPI_COMM_WORLD); \
+} \
+if (pid_j != pid_j_max-1) \
+{ \
+    MPI_Recv(data + (sizeN-1)*sizeM + 1, sizeM-2, MPI_DOUBLE, (pid_j+1)*pid_i_max + pid_i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE); \
+} \
+/* Sync direction right */ \
+if (pid_i != pid_i_max-1) \
+{ \
+    _Pragma("omp parallel for") \
+    for (int j = 1; j < sizeN-1; j++) \
+    { \
+        column_buff1[j-1] = data[j*sizeM + sizeM-2]; \
+    } \
+    MPI_Send(column_buff1, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i + 1, 2, MPI_COMM_WORLD); \
+} \
+if (pid_i != 0) \
+{ \
+    MPI_Recv(column_buff1, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i - 1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE); \
+    _Pragma("omp parallel for") \
+    for (int j = 1; j < sizeN-1; j++) \
+    { \
+        data[j*sizeM] = column_buff1[j-1]; \
+    } \
+} \
+/* Sync direction down */ \
+if (pid_j != pid_j_max-1) \
+{ \
+    MPI_Send(data + (sizeN-2)*sizeM + 1, sizeM-2, MPI_DOUBLE, (pid_j+1)*pid_i_max + pid_i, 3, MPI_COMM_WORLD); \
+} \
+if (pid_j != 0) \
+{ \
+    MPI_Recv(data + 1, sizeM-2, MPI_DOUBLE, (pid_j-1)*pid_i_max + pid_i, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE); \
+} \
+/* Sync direction left */ \
+if (pid_i != 0) \
+{ \
+    _Pragma("omp parallel for") \
+    for (int j = 1; j < sizeN-1; j++) \
+    { \
+        column_buff1[j-1] = data[j*sizeM + 1]; \
+    } \
+    MPI_Send(column_buff1, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i - 1, 4, MPI_COMM_WORLD); \
+} \
+if (pid_i != pid_i_max-1) \
+{ \
+    MPI_Recv(column_buff1, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i + 1, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE); \
+    _Pragma("omp parallel for") \
+    for (int j = 1; j < sizeN-1; j++) \
+    { \
+        data[j*sizeM + sizeM-1] = column_buff1[j-1]; \
+    } \
+}
+
+
 // #################################### //
 int main(int argc, char *argv[])
 {
+    // Get basic MPI info
+    int pid, total_pids;
+    MPI_Init(NULL, NULL);
+    MPI_Comm_rank(MPI_COMM_WORLD, &pid);
+    MPI_Comm_size(MPI_COMM_WORLD, &total_pids);
+    // Grid coordinates
+    int dims[2] = {0,0};
+    MPI_Dims_create(total_pids, 2, dims);
+    int pid_j_max = dims[0],  pid_i_max = dims[1];
+    int pid_j = pid/pid_i_max, pid_i = pid%pid_i_max;
+    string pid_str = "(" + to_string(pid_j) + "," + to_string(pid_i) + ")";
+    string pid_debug_str = "PID" + pid_str + ": ";
+
     // Debug
-    printf("Program is now alive!\n");
+    printf("%sProgram is now alive!\n", pid_debug_str.c_str());
     chrono::steady_clock::time_point prog_stared = chrono::steady_clock::now();
 
     // Check args
     if (argc < 4)
     {
-        printf("N,M, eps, delta are not set!");
+        printf("%sN,M, eps, delta are not set!", pid_debug_str.c_str());
         return -1;
     }
 
@@ -169,7 +242,7 @@ int main(int argc, char *argv[])
     double delta = stod(argv[3]);
 
     // Debug
-    printf("Received parameters: %d, %d, %f\n", N, M, delta);
+    printf("%sReceived parameters: %d, %d, %f\n", pid_debug_str.c_str(), N, M, delta);
     chrono::steady_clock::time_point solve_stared = chrono::steady_clock::now();
 
     // Max and min values of coordinates (define rectangle)
@@ -182,22 +255,10 @@ int main(int argc, char *argv[])
     eps *= eps;
 
     // Debug
-    printf("Other parameters init: Success\n");
-
-    // MPI start
-    // Get basic MPI info
-    int pid, total_pids;
-    MPI_Init(NULL, NULL);
-    MPI_Comm_rank(MPI_COMM_WORLD, &pid);
-    MPI_Comm_size(MPI_COMM_WORLD, &total_pids);
-    // Grid coordinates
-    int dims[2] = {0,0};
-    MPI_Dims_create(total_pids, 2, dims);
-    int pid_j_max = dims[0],  pid_i_max = dims[1];
-    int pid_j = pid/pid_j_max, pid_i = pid%pid_j_max;
+    printf("%sOther parameters init: Success\n", pid_debug_str.c_str());
 
     // Debug
-    printf("MPI init: Success. (Pros %d of %d in total)\n",pid,total_pids);
+    printf("%sMPI init: Success. (Pros %d of %d in total)\n", pid_debug_str.c_str(), pid, total_pids);
 
     // Matrix sizes
     int sizeN = (N/pid_j_max + 1 + (pid_j==(pid_j_max-1) ? N%pid_j_max : 0));
@@ -212,9 +273,18 @@ int main(int argc, char *argv[])
     double *w_ij_curr = reinterpret_cast<double*>(malloc(size * sizeof(double)));
     // Allocate r_ij
     double *r_ij = reinterpret_cast<double*>(malloc(size * sizeof(double)));
+    // Allocate column buffer for MPI
+    double *row_buff1 = reinterpret_cast<double*>(malloc((sizeM-2) * sizeof(double)));
+    double *row_buff2 = reinterpret_cast<double*>(malloc((sizeM-2) * sizeof(double)));
+    double *row_buff3 = reinterpret_cast<double*>(malloc((sizeM-2) * sizeof(double)));
+    double *row_buff4 = reinterpret_cast<double*>(malloc((sizeM-2) * sizeof(double)));
+    double *column_buff1 = reinterpret_cast<double*>(malloc((sizeN-2) * sizeof(double)));
+    double *column_buff2 = reinterpret_cast<double*>(malloc((sizeN-2) * sizeof(double)));
+    double *column_buff3 = reinterpret_cast<double*>(malloc((sizeN-2) * sizeof(double)));
+    double *column_buff4 = reinterpret_cast<double*>(malloc((sizeN-2) * sizeof(double)));
 
     // Debug
-    printf("Allocating memory: Success\n");
+    printf("%sAllocating memory: Success\n", pid_debug_str.c_str());
 
     // Init w_ij_prev as zero matrix
     #pragma omp parallel for collapse(2)
@@ -223,11 +293,12 @@ int main(int argc, char *argv[])
         for (int i = 0; i < sizeM; i++)
         {
             w_ij_prev[j*sizeM + i] = 0;
+            r_ij[j*sizeM + i] = 0;
         }
     }
 
     // Debug
-    printf("Init w_ij: Success\n");
+    printf("%sInit w_ij: Success\n", pid_debug_str.c_str());
 
     // Fill in a_ij, b_ij and F_ij
     #pragma omp parallel for collapse(2)
@@ -419,9 +490,14 @@ int main(int argc, char *argv[])
     }
 
     // Debug
-    printf("Init a_ij, b_ij, F_ij: Success\n");
+    printf("%sInit a_ij, b_ij, F_ij: Success\n", pid_debug_str.c_str());
+    // Save matrices
+    save_matrix(exec_name + "_p" + pid_str + "_a", a_ij, sizeN, sizeM);
+    save_matrix(exec_name + "_p" + pid_str + "_b", b_ij, sizeN, sizeM);
+    save_matrix(exec_name + "_p" + pid_str + "_f", F_ij, sizeN, sizeM);
 
     bool loop_cond = true;
+    double iter_delta;
     // We must count iterations
     int iters = 0;
     // Iterations
@@ -433,25 +509,26 @@ int main(int argc, char *argv[])
         {
             for (int i = 1; i < sizeM-1; i++)
             {
-                r_ij[j*sizeM + i] = DIFF_OPER_A(w_ij_curr) - F_ij[j*sizeM + i];
+                r_ij[j*sizeM + i] = DIFF_OPER_A(w_ij_prev) - F_ij[j*sizeM + i];
             }
         }
+        SYNC_DATA_BORDER(r_ij)
 
         // Compute iteration parameter (division of dot products)
-        double dot_product11 = 0;
-        double dot_product12 = 0;
-        #pragma omp parallel for reduction(+:dot_product11,dot_product12)
+        double dot_product1 = 0;
+        double dot_product2 = 0;
+        #pragma omp parallel for reduction(+:dot_product1,dot_product2)
         for (int j = 1; j < sizeN-1; j++)
         {
             for (int i = 1; i < sizeM-1; i++)
             {
-                dot_product11 += r_ij[j*sizeM + i] * r_ij[j*sizeM + i];
-                dot_product12 += DIFF_OPER_A(r_ij) * r_ij[j*sizeM + i];
+                dot_product1 += r_ij[j*sizeM + i] * r_ij[j*sizeM + i];
+                dot_product2 += DIFF_OPER_A(r_ij) * r_ij[j*sizeM + i];
             }
         }
-        MPI_Allreduce(&dot_product11, &dot_product11, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        MPI_Allreduce(&dot_product12, &dot_product12, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        double iter_param = dot_product11/dot_product12;
+        MPI_Allreduce(&dot_product1, &dot_product1, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        MPI_Allreduce(&dot_product2, &dot_product2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        double iter_param = dot_product1/dot_product2;
 
         // Compute w_ij_curr
         #pragma omp parallel for collapse(2)
@@ -464,7 +541,7 @@ int main(int argc, char *argv[])
         }
 
         // Compute iteration delta (Euclidean norm)
-        double iter_delta = 0;
+        iter_delta = 0;
         double diff;
         #pragma omp parallel for private(diff) reduction(+:iter_delta)
         for (int j = 1; j < sizeN-1; j++)
@@ -479,7 +556,7 @@ int main(int argc, char *argv[])
         iter_delta = sqrt(iter_delta);
 
         // Depending on stop condition
-        if (iter_delta < delta || iters==4)
+        if (iter_delta < delta)
         {
             // Stop loop
             loop_cond = false;
@@ -495,22 +572,21 @@ int main(int argc, char *argv[])
                     w_ij_prev[j*sizeM + i] = w_ij_curr[j*sizeM + i];
                 }
             }
+            SYNC_DATA_BORDER(w_ij_prev)
         }
 
         iters++;
     }
+
     // Debug
-    printf("Loop edned at iteration: %d\n", iters);
+    printf("%sLoop edned at iteration %d with delta %f\n", pid_debug_str.c_str(), iters, iter_delta);
     chrono::steady_clock::time_point solve_ended = chrono::steady_clock::now();
 
     // Save results
-    save_matrix(exec_name  + "_p(" + to_string(pid_j) + "," + to_string(pid_i) + ")_a", a_ij, sizeN, sizeM);
-    save_matrix(exec_name + "_p(" + to_string(pid_j) + "," + to_string(pid_i) + ")_b", b_ij, sizeN, sizeM);
-    save_matrix(exec_name + "_p(" + to_string(pid_j) + "," + to_string(pid_i) + ")_f", F_ij, sizeN, sizeM);
-    //save_matrix(exec_name + "_res", w_ij_curr, sizeN, sizeM);
+    save_matrix(exec_name + "_p" + pid_str + "_res", w_ij_curr, sizeN, sizeM);
 
     // Debug
-    printf("Saving results: Success\n");
+    printf("%sSaving results: Success\n", pid_debug_str.c_str());
 
     // Free allocated memory
     free(a_ij);
@@ -519,16 +595,20 @@ int main(int argc, char *argv[])
     free(w_ij_prev);
     free(w_ij_curr);
     free(r_ij);
+    free(row_buff1);
+    free(column_buff1);
 
     // Debug
-    printf("Freeing memory: Success\n");
+    printf("%sFreeing memory: Success\n", pid_debug_str.c_str());
 
     // Debug
     chrono::steady_clock::time_point prog_ended = chrono::steady_clock::now();
-    printf("Solver run time: %ld.%ld[s]\n", chrono::duration_cast<std::chrono::milliseconds>(solve_ended - solve_stared).count()/1000,
-                                            chrono::duration_cast<std::chrono::milliseconds>(solve_ended - solve_stared).count()%1000);
-    printf("Programm run time: %ld.%ld[s]\n", chrono::duration_cast<std::chrono::milliseconds>(prog_ended - prog_stared).count()/1000,
-                                              chrono::duration_cast<std::chrono::milliseconds>(prog_ended - prog_stared).count()%1000);
+    printf("%sSolver run time: %ld.%ld[s]\n", pid_debug_str.c_str(),
+           chrono::duration_cast<std::chrono::milliseconds>(solve_ended - solve_stared).count()/1000,
+           chrono::duration_cast<std::chrono::milliseconds>(solve_ended - solve_stared).count()%1000);
+    printf("%sProgramm run time: %ld.%ld[s]\n", pid_debug_str.c_str(),
+           chrono::duration_cast<std::chrono::milliseconds>(prog_ended - prog_stared).count()/1000,
+           chrono::duration_cast<std::chrono::milliseconds>(prog_ended - prog_stared).count()%1000);
 
     // MPI ending
     MPI_Finalize();

@@ -401,8 +401,13 @@ int main(int argc, char *argv[])
 
     // Debug
     printf("Init a_ij, b_ij, F_ij: Success\n");
+    // Save matrices
+    save_matrix(exec_name + "_a", a_ij, N, M);
+    save_matrix(exec_name + "_b", b_ij, N, M);
+    save_matrix(exec_name + "_f", F_ij, N, M);
 
     bool loop_cond = true;
+    double iter_delta;
     // We must count iterations
     int iters = 0;
     // Iterations
@@ -414,23 +419,23 @@ int main(int argc, char *argv[])
         {
             for (int i = 1; i < M-1; i++)
             {
-                r_ij[j*M + i] = DIFF_OPER_A(w_ij_curr) - F_ij[j*M + i];
+                r_ij[j*M + i] = DIFF_OPER_A(w_ij_prev) - F_ij[j*M + i];
             }
         }
 
         // Compute iteration parameter (division of dot products)
-        double dot_product11 = 0;
-        double dot_product12 = 0;
-        #pragma omp parallel for reduction(+:dot_product11,dot_product12)
+        double dot_product1 = 0;
+        double dot_product2 = 0;
+        #pragma omp parallel for reduction(+:dot_product1,dot_product2)
         for (int j = 1; j < N-1; j++)
         {
             for (int i = 1; i < M-1; i++)
             {
-                dot_product11 += r_ij[j*M + i] * r_ij[j*M + i];
-                dot_product12 += DIFF_OPER_A(r_ij) * r_ij[j*M + i];
+                dot_product1 += r_ij[j*M + i] * r_ij[j*M + i];
+                dot_product2 += DIFF_OPER_A(r_ij) * r_ij[j*M + i];
             }
         }
-        double iter_param = dot_product11/dot_product12;
+        double iter_param = dot_product1/dot_product2;
 
         // Compute w_ij_curr
         #pragma omp parallel for collapse(2)
@@ -443,7 +448,7 @@ int main(int argc, char *argv[])
         }
 
         // Compute iteration delta (Euclidean norm)
-        double iter_delta = 0;
+        iter_delta = 0;
         double diff;
         #pragma omp parallel for private(diff) reduction(+:iter_delta)
         for (int j = 1; j < N-1; j++)
@@ -477,14 +482,12 @@ int main(int argc, char *argv[])
 
         iters++;
     }
+    
     // Debug
-    printf("Loop edned at iteration: %d\n", iters);
+    printf("Loop edned at iteration %d with delta %f\n", iters, iter_delta);
     chrono::steady_clock::time_point solve_ended = chrono::steady_clock::now();
 
     // Save results
-    save_matrix(exec_name + "_a", a_ij, N, M);
-    save_matrix(exec_name + "_b", b_ij, N, M);
-    save_matrix(exec_name + "_f", F_ij, N, M);
     save_matrix(exec_name + "_res", w_ij_curr, N, M);
 
     // Debug
