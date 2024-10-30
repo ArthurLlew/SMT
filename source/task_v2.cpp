@@ -164,17 +164,17 @@ if (pid_i != pid_i_max-1) \
     _Pragma("omp parallel for") \
     for (int j = 1; j < sizeN-1; j++) \
     { \
-        column_buff1[j-1] = data[j*sizeM + sizeM-2]; \
+        column_buff[j-1] = data[j*sizeM + sizeM-2]; \
     } \
-    MPI_Send(column_buff1, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i + 1, 2, MPI_COMM_WORLD); \
+    MPI_Send(column_buff, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i + 1, 2, MPI_COMM_WORLD); \
 } \
 if (pid_i != 0) \
 { \
-    MPI_Recv(column_buff1, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i - 1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE); \
+    MPI_Recv(column_buff, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i - 1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE); \
     _Pragma("omp parallel for") \
     for (int j = 1; j < sizeN-1; j++) \
     { \
-        data[j*sizeM] = column_buff1[j-1]; \
+        data[j*sizeM] = column_buff[j-1]; \
     } \
 } \
 /* Sync direction down */ \
@@ -192,17 +192,17 @@ if (pid_i != 0) \
     _Pragma("omp parallel for") \
     for (int j = 1; j < sizeN-1; j++) \
     { \
-        column_buff1[j-1] = data[j*sizeM + 1]; \
+        column_buff[j-1] = data[j*sizeM + 1]; \
     } \
-    MPI_Send(column_buff1, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i - 1, 4, MPI_COMM_WORLD); \
+    MPI_Send(column_buff, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i - 1, 4, MPI_COMM_WORLD); \
 } \
 if (pid_i != pid_i_max-1) \
 { \
-    MPI_Recv(column_buff1, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i + 1, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE); \
+    MPI_Recv(column_buff, sizeN-2, MPI_DOUBLE, (pid_j)*pid_i_max + pid_i + 1, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE); \
     _Pragma("omp parallel for") \
     for (int j = 1; j < sizeN-1; j++) \
     { \
-        data[j*sizeM + sizeM-1] = column_buff1[j-1]; \
+        data[j*sizeM + sizeM-1] = column_buff[j-1]; \
     } \
 }
 
@@ -274,14 +274,7 @@ int main(int argc, char *argv[])
     // Allocate r_ij
     double *r_ij = reinterpret_cast<double*>(malloc(size * sizeof(double)));
     // Allocate column buffer for MPI
-    double *row_buff1 = reinterpret_cast<double*>(malloc((sizeM-2) * sizeof(double)));
-    double *row_buff2 = reinterpret_cast<double*>(malloc((sizeM-2) * sizeof(double)));
-    double *row_buff3 = reinterpret_cast<double*>(malloc((sizeM-2) * sizeof(double)));
-    double *row_buff4 = reinterpret_cast<double*>(malloc((sizeM-2) * sizeof(double)));
-    double *column_buff1 = reinterpret_cast<double*>(malloc((sizeN-2) * sizeof(double)));
-    double *column_buff2 = reinterpret_cast<double*>(malloc((sizeN-2) * sizeof(double)));
-    double *column_buff3 = reinterpret_cast<double*>(malloc((sizeN-2) * sizeof(double)));
-    double *column_buff4 = reinterpret_cast<double*>(malloc((sizeN-2) * sizeof(double)));
+    double *column_buff = reinterpret_cast<double*>(malloc((sizeN-2) * sizeof(double)));
 
     // Debug
     printf("%sAllocating memory: Success\n", pid_debug_str.c_str());
@@ -595,8 +588,7 @@ int main(int argc, char *argv[])
     free(w_ij_prev);
     free(w_ij_curr);
     free(r_ij);
-    free(row_buff1);
-    free(column_buff1);
+    free(column_buff);
 
     // Debug
     printf("%sFreeing memory: Success\n", pid_debug_str.c_str());
