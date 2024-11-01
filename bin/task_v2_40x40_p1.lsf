@@ -1,0 +1,5 @@
+#BSUB -n 1
+#BSUB -W 00:15
+#BSUB -o output/task_v2_40x40_p1.%J.out
+#BSUB -e output/task_v2_40x40_p1.%J.err
+mpiexec ./task_v2_ 40 40 0.00004
