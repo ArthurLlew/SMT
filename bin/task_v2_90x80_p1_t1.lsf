@@ -2,4 +2,5 @@
 #BSUB -W 00:15
 #BSUB -o output/task_v2_90x80_p1_t1.%J.out
 #BSUB -e output/task_v2_90x80_p1_t1.%J.err
-OMP_NUM_THREADS=1 mpiexec ./task_v2 90 80 0.00025
+#BSUB -R "affinity[core(1)]"
+mpiexec ./task_v2 90 80 0.00025
